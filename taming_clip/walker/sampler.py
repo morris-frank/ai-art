@@ -9,7 +9,7 @@ from torch import Tensor
 
 from . import print, rule
 from .generator import Generator
-from .clip import CLIP
+from .perceptor import Perceptor
 
 
 class Pivot(torch.nn.Module):
@@ -42,7 +42,7 @@ class Sampler:
         self.device = device
 
         self.generator = Generator(width, height, device)
-        self.perceptor = CLIP(device)
+        self.perceptor = Perceptor(device)
 
         self.weight_decay = 0.1
         self.batch_size = 1

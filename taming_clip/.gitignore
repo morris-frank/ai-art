@@ -5,5 +5,3 @@ lib
 models
 .mailmap
 log_file
-weights
-progress*
