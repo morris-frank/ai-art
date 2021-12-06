@@ -1,5 +1,5 @@
 datasets
 checkpoints
-finetune
-generate
+samples
+interpolations
 *csv

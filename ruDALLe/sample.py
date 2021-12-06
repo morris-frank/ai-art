@@ -12,7 +12,7 @@ from utils import log
 parser = ArgumentParser()
 parser.add_argument("-chkpt")
 parser.add_argument("-texts", nargs="+")
-parser.add_argument("-clean", action="store_true")
+parser.add_argument("-c", action="store_true")
 parser.add_argument("-device", default="cuda:1")
 args = parser.parse_args()
 
@@ -63,7 +63,7 @@ def sample(model, vae, text: str, target_folder: str, clean_prev: bool = False):
 if args.chkpt:
     with log("loading checkpoint"):
         model = get_rudalle_model("Malevich", pretrained=True, fp16=True, device=args.device)
-        model.load_state_dict(f"./checkpoints/{torch.load(args.chkpt)}_last.pt")
+        model.load_state_dict(torch.load(f"./checkpoints/{args.chkpt}_dalle_last.pt"))
     with log("loading vae"):
         vae = get_vae().to(args.device)
 else:
@@ -72,6 +72,7 @@ else:
     with log("loading vae"):
         vae = get_vae(dwt=True).to(args.device)
 
+chkpt_name = args.chkpt if args.chkpt else "initial"
 for text in args.texts:
     with log(f"Sample with {text}"):
-        sample(model, vae, text, f"generate/{text}", args.clean)
+        sample(model, vae, text, f"samples/{chkpt_name}/{text}", not args.c)

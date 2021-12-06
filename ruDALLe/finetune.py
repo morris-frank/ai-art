@@ -19,11 +19,11 @@ from utils import log
 parser = ArgumentParser()
 parser.add_argument("-dataset", default="asterix1to8_panels")
 parser.add_argument("-device", default="cuda:0")
-parser.add_argument("-epochs", default=10, type=int)
+parser.add_argument("-epochs", default=5, type=int)
 parser.add_argument("-save_path", default="checkpoints/", type=Path)
 parser.add_argument("-bs", default=4, type=int)
 parser.add_argument("-clip", default=0.24, type=float)
-parser.add_argument("-lr", default=8e-5, type=float)
+parser.add_argument("-lr", default=4e-5, type=float)
 args = parser.parse_args()
 args.save_path.mkdir(exist_ok=True)
 
