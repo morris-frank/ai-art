@@ -14,19 +14,23 @@ from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 from transformers import AdamW
 
+from utils import log
+
 parser = ArgumentParser()
 parser.add_argument("-dataset", default="asterix1to8_panels")
 parser.add_argument("-device", default="cuda:0")
-parser.add_argument("-epochs", default=10)
+parser.add_argument("-epochs", default=10, type=int)
 parser.add_argument("-save_path", default="checkpoints/", type=Path)
-parser.add_argument("-bs", default=4)
-parser.add_argument("-clip", default=0.24)
-parser.add_argument("-lr", default=8e-5)
+parser.add_argument("-bs", default=4, type=int)
+parser.add_argument("-clip", default=0.24, type=float)
+parser.add_argument("-lr", default=8e-5, type=float)
 args = parser.parse_args()
 args.save_path.mkdir(exist_ok=True)
 
-model = get_rudalle_model("Malevich", pretrained=True, fp16=True, device=args.device)
-vae = get_vae().to(args.device)
+with log("loading base model"):
+    model = get_rudalle_model("Malevich", pretrained=True, fp16=True, device=args.device)
+with log("loading vae"):
+    vae = get_vae().to(args.device)
 tokenizer = get_tokenizer()
 
 
