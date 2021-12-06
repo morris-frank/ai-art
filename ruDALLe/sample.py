@@ -63,7 +63,7 @@ def sample(model, vae, text: str, target_folder: str, clean_prev: bool = False):
 if args.chkpt:
     with log("loading checkpoint"):
         model = get_rudalle_model("Malevich", pretrained=True, fp16=True, device=args.device)
-        model.load_state_dict(torch.load(args.chkpt))
+        model.load_state_dict(f"./checkpoints/{torch.load(args.chkpt)}_last.pt")
     with log("loading vae"):
         vae = get_vae().to(args.device)
 else:
