@@ -1,12 +1,13 @@
+import shutil
 from argparse import ArgumentParser
-import torch
-from rich import print
-from rudalle import get_rudalle_model, get_vae
 from pathlib import Path
-from rudalle import get_realesrgan, get_ruclip, get_tokenizer
+
+import torch
+from rudalle import get_realesrgan, get_ruclip, get_rudalle_model, get_tokenizer, get_vae
 from rudalle.pipelines import cherry_pick_by_clip, generate_images, super_resolution
 from rudalle.utils import seed_everything
-import shutil
+
+from utils import log
 
 parser = ArgumentParser()
 parser.add_argument("-chkpt")
@@ -15,14 +16,13 @@ parser.add_argument("-clean", action="store_true")
 parser.add_argument("-device", default="cuda:1")
 args = parser.parse_args()
 
-print("[yellow]Loading upsample GAN[/yellow]")
-realesrgan = get_realesrgan("x2", device=args.device)
-print("[green]Loaded upsample GAN[/green]")
-print("[yellow]Loading CLiP[/yellow]")
-ruclip, ruclip_processor = get_ruclip("ruclip-vit-base-patch32-v5")
-ruclip = ruclip.to(args.device)
-print("[green]Loaded CLiP[/green]")
+with log("loading upsample GAN"):
+    realesrgan = get_realesrgan("x2", device=args.device)
+with log("loading CLiP"):
+    ruclip, ruclip_processor = get_ruclip("ruclip-vit-base-patch32-v5")
+    ruclip = ruclip.to(args.device)
 tokenizer = get_tokenizer()
+
 
 def sample(model, vae, text: str, target_folder: str, clean_prev: bool = False):
     seed_everything(42)
@@ -44,7 +44,9 @@ def sample(model, vae, text: str, target_folder: str, clean_prev: bool = False):
         pil_images += _pil_images
         scores += _scores
 
-    top_images, clip_scores = cherry_pick_by_clip(pil_images, text, ruclip, ruclip_processor, device=args.device, count=24)
+    top_images, clip_scores = cherry_pick_by_clip(
+        pil_images, text, ruclip, ruclip_processor, device=args.device, count=24
+    )
     sr_images = super_resolution(top_images, realesrgan)
 
     target_folder = Path(f"./{target_folder}/")
@@ -57,14 +59,19 @@ def sample(model, vae, text: str, target_folder: str, clean_prev: bool = False):
             i += 1
         image.save(target_folder / f"{i:05}.png")
 
+
 if args.chkpt:
-    model = get_rudalle_model("Malevich", pretrained=True, fp16=True, device=args.device)
-    model.load_state_dict(torch.load(args.chkpt))
-    vae = get_vae().to(args.device)
+    with log("loading checkpoint"):
+        model = get_rudalle_model("Malevich", pretrained=True, fp16=True, device=args.device)
+        model.load_state_dict(torch.load(args.chkpt))
+    with log("loading vae"):
+        vae = get_vae().to(args.device)
 else:
-    model = get_rudalle_model("Malevich", pretrained=True, fp16=True, device=args.device)
-    vae = get_vae(dwt=True).to(args.device)
+    with log("loading ruDALL-e model"):
+        model = get_rudalle_model("Malevich", pretrained=True, fp16=True, device=args.device)
+    with log("loading vae"):
+        vae = get_vae(dwt=True).to(args.device)
 
 for text in args.texts:
-    print(f"[red]{text}[/red]")
-    sample(model, vae, text, f"generate/{text}", args.clean)
+    with log(f"Sample with {text}"):
+        sample(model, vae, text, f"generate/{text}", args.clean)
