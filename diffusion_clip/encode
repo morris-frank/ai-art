@@ -1,0 +1,24 @@
+#! /bin/sh
+
+set -e
+
+fps=60
+
+if [ -d ./results/$1/ ]; then
+    cd ./results/$1
+    echo "Encoding $1"
+    ffmpeg -y -framerate $fps -pattern_type glob -i "interpolations/*.png" -vcodec libx264 -pix_fmt yuv420p -maxrate 8096k -profile:v high -crf 18 $1.mp4
+
+    song_name=$(echo $1| rev |cut -d_ -f2-| rev)
+    song_path="../../scripts/${song_name}.mp3"
+    if [ -f $song_path ]; then
+        echo "Found song"
+        mv $1.mp4 tmp.mp4
+        ffmpeg -y -i tmp.mp4 -i $song_path -acodec aac -ar 44100 -ac 2 $1.mp4
+        rm tmp.mp4
+    fi
+
+    ffmpeg -y -i $1.mp4 -filter:v "scale=-1:720" -strict experimental -r 30 -minrate 4096k -maxrate 4096k -bufsize 4096k -t 2:20 $1_twitter.mp4
+else
+    echo "$1 not found"
+fi
