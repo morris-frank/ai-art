@@ -5,6 +5,7 @@ conda activate art
 
 if [ ! -d ../lib/taming-transformers ]; then
     git clone https://github.com/CompVis/taming-transformers  ../lib/taming-transformers
+    pip install -e ../lib/taming-transformers
 fi
 
 mkdir weights; cd weights
