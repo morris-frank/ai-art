@@ -262,7 +262,6 @@ parser.add_argument("-num_channels", default=256, type=int)
 parser.add_argument("-num_head_channels", default=64, type=int)
 parser.add_argument("-num_res_blocks", default=2, type=int)
 parser.add_argument("-rescale_timesteps", action="store_true")
-parser.add_argument("-timestep_respacing", default="500")
 parser.add_argument("-use_checkpoint", action="store_true")
 parser.add_argument("-use_version_one", action="store_true")
 parser.add_argument("-tv_scale", default=0, type=float)  # Controls the smoothness of the final output.
@@ -273,6 +272,7 @@ parser.add_argument("-n_batches", default=1, type=int)
 parser.add_argument("-seed", default=0, type=int)
 
 parser.add_argument("-prompts", default=["a avocado logo"], nargs="*")
+parser.add_argument("-timestep_respacing", default="1000")
 parser.add_argument("-image_prompts", default=[], nargs="*")
 parser.add_argument(
     "-init_image", default=None, type=file_input

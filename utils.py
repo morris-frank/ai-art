@@ -7,7 +7,7 @@ from typing import Any
 import requests
 from rich import get_console, pretty
 import collections.abc
-from rich import print as _print
+from rich import print
 from rich import traceback
 import re
 
@@ -42,10 +42,6 @@ def output_path(*names: str, ext="png") -> Path:
     while (folder / f"{i:05}.{ext}").exists():
         i += 1
     return folder / f"{i:05}.{ext}"
-
-
-def print(text=""):
-    _print(f"[yellow]{text}[/yellow]")
 
 
 @contextmanager
