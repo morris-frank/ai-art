@@ -33,15 +33,15 @@ def file_input(path: str):
             path = next(input_path.glob(f"{path}*"))
         return open(path, "rb")
 
-def output_path(*names: str) -> Path:
+def output_path(*names: str, ext="png") -> Path:
     def tostr(obj: Any) -> str:
         return ".".join(map(tostr, obj)) if isinstance(obj, collections.abc.Sequence) and not isinstance(obj, str) else re.sub('[^\w ]+','', str(obj)).lower().strip().replace(" ", ".")
     folder = results_path / tostr(names)
     folder.mkdir(exist_ok=True, parents=True)
     i = 0
-    while (folder / f"{i:05}.png").exists():
+    while (folder / f"{i:05}.{ext}").exists():
         i += 1
-    return folder / f"{i:05}.png"
+    return folder / f"{i:05}.{ext}"
 
 
 def print(text=""):
