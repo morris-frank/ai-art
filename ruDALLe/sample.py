@@ -11,6 +11,7 @@ from utils import log
 
 parser = ArgumentParser()
 parser.add_argument("-chkpt")
+parser.add_argument("-model", default="Malevich")
 parser.add_argument("-texts", nargs="+")
 parser.add_argument("-c", action="store_true")
 parser.add_argument("-device", default="cuda:1")
@@ -62,13 +63,13 @@ def sample(model, vae, text: str, target_folder: str, clean_prev: bool = False):
 
 if args.chkpt:
     with log("loading checkpoint"):
-        model = get_rudalle_model("Malevich", pretrained=True, fp16=True, device=args.device)
+        model = get_rudalle_model(args.model, pretrained=True, fp16=True, device=args.device)
         model.load_state_dict(torch.load(f"./checkpoints/{args.chkpt}_dalle_last.pt"))
     with log("loading vae"):
         vae = get_vae().to(args.device)
 else:
     with log("loading ruDALL-e model"):
-        model = get_rudalle_model("Malevich", pretrained=True, fp16=True, device=args.device)
+        model = get_rudalle_model(args.model, pretrained=True, fp16=True, device=args.device)
     with log("loading vae"):
         vae = get_vae(dwt=True).to(args.device)
 

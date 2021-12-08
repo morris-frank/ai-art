@@ -24,11 +24,12 @@ parser.add_argument("-save_path", default="checkpoints/", type=Path)
 parser.add_argument("-bs", default=4, type=int)
 parser.add_argument("-clip", default=0.24, type=float)
 parser.add_argument("-lr", default=4e-5, type=float)
+parser.add_argument("-model", default="Malevich")
 args = parser.parse_args()
 args.save_path.mkdir(exist_ok=True)
 
 with log("loading base model"):
-    model = get_rudalle_model("Malevich", pretrained=True, fp16=True, device=args.device)
+    model = get_rudalle_model(args.model, pretrained=True, fp16=True, device=args.device)
 with log("loading vae"):
     vae = get_vae().to(args.device)
 tokenizer = get_tokenizer()
@@ -147,12 +148,12 @@ def train(model, train_dataloader: RuDalleDataset):
             progress.update()
             progress.set_postfix({"loss": loss.item()})
 
-    print(f"Complitly tuned and saved here  {args.dataset}__dalle_last.pt")
+    print(f"Complitly tuned and saved here  {args.dataset}__{args.model}_last.pt")
 
     plt.plot(loss_logs)
     plt.savefig(args.save_path / f"{args.dataset}_dalle_last.png")
 
-    torch.save(model.state_dict(), args.save_path / f"{args.dataset}_dalle_last.pt")
+    torch.save(model.state_dict(), args.save_path / f"{args.dataset}_{args.model}_last.pt")
 
 
 # @markdown You can unfreeze or freeze more parametrs, but it can
