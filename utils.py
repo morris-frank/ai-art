@@ -10,13 +10,26 @@ import collections.abc
 from rich import print
 from rich import traceback
 import re
+from argparse import ArgumentParser as _ArgumentParser
 
 console = get_console()
 pretty.install()
 traceback.install()
 
-input_path = Path(__file__).parents[1] / "inputs"
-results_path = Path(__file__).parent / "results"
+CWD = Path(__file__).parent
+input_path = CWD.parent / "inputs"
+results_path = CWD / "results"
+
+def ArgumentParser() -> _ArgumentParser:
+    parser = _ArgumentParser()
+    parser.add_argument("-d", "-device",   dest="device", default="cuda:0")
+    parser.add_argument("-c", "-continue", dest="cont", action="store_true", help="Do not delete previous results.")
+    weight_dirs = list(filter(lambda d: (CWD/d).exists(), ["models", "weights", "checkpoints"]))
+    # if len(weight_dirs) > 0:
+    #     parser.add_argument("-chkpt", "-weights", "-checkpoint", dest="checkpoint")
+    if (CWD / "checkpoints").exists():
+        print("checkpoints exists")
+    return parser
 
 def file_input(path: str):
     if path is None:

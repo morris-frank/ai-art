@@ -17,14 +17,14 @@ from transformers import AdamW
 from utils import log
 
 parser = ArgumentParser()
-parser.add_argument("-dataset", default="asterix1to8_panels")
+parser.add_argument("-dataset")
 parser.add_argument("-device", default="cuda:0")
-parser.add_argument("-epochs", default=5, type=int)
+parser.add_argument("-epochs", default=1, type=int)
 parser.add_argument("-save_path", default="checkpoints/", type=Path)
 parser.add_argument("-bs", default=4, type=int)
 parser.add_argument("-clip", default=0.24, type=float)
-parser.add_argument("-lr", default=4e-5, type=float)
-parser.add_argument("-model", default="Malevich")
+parser.add_argument("-lr", default=1e-5, type=float)
+parser.add_argument("-model", default="Malevich", choices={"Malevich", "Emojich"})
 args = parser.parse_args()
 args.save_path.mkdir(exist_ok=True)
 
@@ -124,6 +124,7 @@ def freeze(
 
 # markdown Simple training loop
 def train(model, train_dataloader: RuDalleDataset):
+    save_name = f"{args.dataset}_lr_{args.lr:.0e}__{args.model}"
     loss_logs = []
     progress = tqdm(total=len(train_dataloader), desc="finetuning goes brrr")
     save_counter = 0
@@ -148,12 +149,12 @@ def train(model, train_dataloader: RuDalleDataset):
             progress.update()
             progress.set_postfix({"loss": loss.item()})
 
-    print(f"Complitly tuned and saved here  {args.dataset}__{args.model}_last.pt")
+    print(f"Complitly tuned and saved here  {save_name}_last.pt")
 
     plt.plot(loss_logs)
-    plt.savefig(args.save_path / f"{args.dataset}_dalle_last.png")
+    plt.savefig(args.save_path / f"{save_name}_last.png")
 
-    torch.save(model.state_dict(), args.save_path / f"{args.dataset}_{args.model}_last.pt")
+    torch.save(model.state_dict(), args.save_path / f"{save_name}_last.pt")
 
 
 # @markdown You can unfreeze or freeze more parametrs, but it can
