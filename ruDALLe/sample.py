@@ -73,12 +73,12 @@ chkpt_name = args.chkpt if args.chkpt else "initial"
 
 if args.texts == ["examples"]:
     args.texts = [
-        "акварель",  # watercolor
+        # "акварель",  # watercolor
         "аниме",  # anime
         "Бексиньский Здзислав картина",  # Beksinski Zdzislav picture
-        "векторная графика",  # vector graphic
+        # "векторная графика",  # vector graphic
         "вышивка",  # embroidery
-        "Гориллы",  # Gorillas
+        # "Гориллы",  # Gorillas
         "графический роман",  # graphic novel
         "детальная картина маслом",  # detailed oil painting
         "картина из ван гога",  # van gogh painting
@@ -86,7 +86,7 @@ if args.texts == ["examples"]:
         "коллаж",  # collage
         "коммунистический социалистический молодежный боец",  # communist socialist youth fighter
         "линейное искусство",  # line art
-        "лофи",  # lo-fi
+        # "лофи",  # lo-fi
         "милая сумасшедшая обезьяна",  # cute crazy monkey
         "Моне Клод картина",  # Monet Claude painting
         "оранжевый панк психоделическая картина",  # orange punk psychedelic painting
@@ -100,7 +100,7 @@ if args.texts == ["examples"]:
         "фотореалистичный",  # photorealistic
         "фотошоп",  # photoshop
         "хиппи бесплатно любовь солнышко",  # hippie free love sunshine
-        "электрические цвета",  # electric colors
+        # "электрические цвета",  # electric colors
         "эффект линзы рыбий глаз",  # fisheye lens effect
         "мохнатая кожа",  # furry skin
         "лицо как у инопланетянина, реалистичный рендеринг",  # alien like face, realistic render
