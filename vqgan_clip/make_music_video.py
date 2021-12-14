@@ -15,6 +15,7 @@ def parse_cli():
     relevant.add_argument("-script", type=str, default=None, help="Path to the CSV prompt script")
     relevant.add_argument("-music", type=str, default=None, help="Path to the music file")
     relevant.add_argument("-lr", type=float, default=0.1, help="Learning rate")
+    relevant.add_argument("-lr_warmup", type=float, default=0.1, help="Percentage of the video that is used for linear LR start up")
     relevant.add_argument("-device", type=str, default="cuda:0", help="GPU to use")
     relevant.add_argument("-fps", type=int, default=25, help="Sampling rate alas the FPS of the output video")
 
@@ -22,11 +23,11 @@ def parse_cli():
     effects.add_argument("-max_zoom", type=float, default=0.01, help="Maximal zoom percentage in one step")
     effects.add_argument("-max_rotate", type=int, default=5, help="Maximal degrees rotation in one step")
     effects.add_argument("-beat_measure", type=int, default=16, help="Measure of the song, counted in beats")
-    effects.add_argument("-beat_phase", type=int, default=5, help="Start of the first measure, counted in beats")
+    effects.add_argument("-beat_phase", type=int, default=14, help="Start of the first measure, counted in beats")
 
     irrelevant = parser.add_argument_group("Probably uninteresting arguments")
     irrelevant.add_argument("-size", type=int, nargs=2, default=[1280, 720], help="Output width/height of the video")
-    irrelevant.add_argument("-seed", type=int, default=None, help="torch seed to use")
+    irrelevant.add_argument("-seed", type=int, default=9722186517928954566, help="torch seed to use")
     irrelevant.add_argument("-optimizer", type=str, default="Adam", help="Optimizer to use from torch.optim")
     irrelevant.add_argument(
         "-save_path", type=str, default="./frames", help="Path to the folder where frames are saved"
@@ -325,7 +326,7 @@ with log("Effect library"):
             return z
 
         pil_image = Image.fromarray(np.array(img).astype("uint8"), "RGB")
-        pil_image = zoom_at(pil_image, img.shape[0] / 2, img.shape[1] / 2, 1 - zoom * cli.max_zoom)
+        pil_image = zoom_at(pil_image, img.shape[1] / 2, img.shape[0] / 2, 1 - zoom * cli.max_zoom)
         # pil_image = pil_image.rotate(round(rotate * cli.max_rotate))
 
         _z, *_ = model.encode(TF.to_tensor(pil_image).to(cli.device).unsqueeze(0) * 2 - 1)
@@ -338,17 +339,19 @@ with log("Load image model"):
 with log("Load clip"):
     perceptor = clip.load(cli.clip_model, jit=False)[0].eval().requires_grad_(False).to(cli.device)
 with log("Setup latent, input and  optim"):
+    n_frames = max(script.keys()) if cli.music is None else eq.shape[-1]
     make_cutouts = MakeCutouts(perceptor.visual.input_resolution, cli.cutn, cut_pow=cli.cut_pow)
     z, *_ = model.encode(load_init_image(model, cli.init_image).to(cli.device).unsqueeze(0) * 2 - 1)
     z.requires_grad_(True)
     optimizer: torch.optim.Optimizer = getattr(torch.optim, cli.optimizer)([z], lr=cli.lr)
-    n_frames = max(script.keys()) if cli.music is None else eq.shape[-1]
+    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda x: np.minimum(1, x/(n_frames * cli.lr_warmup)))
 
 console.rule("🕹 Settings 🕹")
 print(f"""[yellow]
     The plan is the following:
-    Will generate {n_frames=} on {cli.device=} with {seed=}\n
-    using script:[/yellow]""")
+    Will generate {n_frames=} on {cli.device=} with {seed=}.
+    Learning rate with reach {cli.lr=} after linearly going there for {n_frames*cli.lr_warmup} steps.
+    Prompt script is[/yellow]""")
 print(script)
 print(f"""[yellow]
     With the {cli.music=} that has {sum(beats)=} zoomable.[/yellow]""")
@@ -366,6 +369,7 @@ for frame in trange(n_frames):
     loss = prompt(y_aug)
     loss.backward()
     optimizer.step()
+    scheduler.step()
     with torch.inference_mode():
         z.copy_(z.maximum(z_min).minimum(z_max))
 
@@ -374,4 +378,4 @@ for frame in trange(n_frames):
     imageio.imwrite(save_path / f"{frame:05d}.png", img)
 
     if cli.music is not None:
-        z = image_effects(model, z, img, beats[frame], eq[-4, frame])
+        z = image_effects(model, z, img, eq[0, frame] * beats[frame], eq[-4, frame])
