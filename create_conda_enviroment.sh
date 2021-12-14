@@ -10,7 +10,7 @@ conda activate $env_name
 
 conda install -y pytorch torchvision torchaudio cudatoolkit=11.3 -c pytorch
 conda install mamba -c conda-forge -y
-mamba install -c conda-forge pytorch-lightning kornia ftfy rich pandas scipy ipython omegaconf regex ipdb imageio imageio-ffmpeg einops -y
+mamba install -c conda-forge pytorch-lightning kornia ftfy rich pandas scipy ipython omegaconf regex ipdb imageio imageio-ffmpeg einops librosa ffmpeg -y
 
 mkdir lib
 echo "FINISHED SETTING UP ENVIROMENT _art_"
