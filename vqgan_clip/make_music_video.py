@@ -12,8 +12,8 @@ def parse_cli():
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     relevant = parser.add_argument_group("Basic arguments")
     relevant.add_argument("init_image", type=str, help="Path to the inital frame")
-    relevant.add_argument("-script", type=Path, default=None, help="Path to the CSV prompt script")
-    relevant.add_argument("-music", type=Path, default=None, help="Path to the music file")
+    relevant.add_argument("-script", type=str, default=None, help="Path to the CSV prompt script")
+    relevant.add_argument("-music", type=str, default=None, help="Path to the music file")
     relevant.add_argument("-lr", type=float, default=0.1, help="Learning rate")
     relevant.add_argument("-device", type=str, default="cuda:0", help="GPU to use")
     relevant.add_argument("-fps", type=int, default=25, help="Sampling rate alas the FPS of the output video")
@@ -21,11 +21,11 @@ def parse_cli():
     effects = parser.add_argument_group("Effect arguments")
     effects.add_argument("-max_zoom", type=float, default=0.01, help="Maximal zoom percentage in one step")
     effects.add_argument("-max_rotate", type=int, default=5, help="Maximal degrees rotation in one step")
-    effects.add_argument("-beat_measure", type=int, default=4, help="Measure of the song, counted in beats")
+    effects.add_argument("-beat_measure", type=int, default=16, help="Measure of the song, counted in beats")
     effects.add_argument("-beat_phase", type=int, default=5, help="Start of the first measure, counted in beats")
 
     irrelevant = parser.add_argument_group("Probably uninteresting arguments")
-    irrelevant.add_argument("-size", type=int, default=900, help="Output width/height of the video")
+    irrelevant.add_argument("-size", type=int, nargs=2, default=[1280, 720], help="Output width/height of the video")
     irrelevant.add_argument("-seed", type=int, default=None, help="torch seed to use")
     irrelevant.add_argument("-optimizer", type=str, default="Adam", help="Optimizer to use from torch.optim")
     irrelevant.add_argument(
@@ -107,7 +107,9 @@ with log("Setup inputs"):
     script = {}
     if cli.script is not None:
         script = pd.read_csv(cli.script, header=None, index_col=0)
-        script.index = script.index * cli.fps
+        script.index = cli.fps * script.index.to_series().apply(
+            lambda time: sum(x * int(t) for x, t in zip([60, 1], time.split(":")))
+        )
         script: Dict[int, str] = script.to_dict()[1]
 
     if cli.music is not None:
@@ -306,19 +308,21 @@ with log("Special library"):
 
     def load_init_image(model, path):
         f = 2 ** (model.decoder.num_resolutions - 1)
-        side = (cli.size // f) * f
-        img = Image.open(path).convert("RGB").resize((side, side), Image.LANCZOS)
+        img = Image.open(path).convert("RGB").resize(((cli.size[0] // f) * f, (cli.size[1] // f) * f), Image.LANCZOS)
         return TF.to_tensor(img)
 
 
 with log("Effect library"):
 
-    def image_effects(model, img, zoom, rotate):
+    def image_effects(model, z, img, zoom, rotate):
         def zoom_at(img, x, y, zoom):
             w, h = img.size
             zoom2 = zoom * 2
             img = img.crop((x - w / zoom2, y - h / zoom2, x + w / zoom2, y + h / zoom2))
             return img.resize((w, h), Image.LANCZOS)
+
+        if zoom == 0:
+            return z
 
         pil_image = Image.fromarray(np.array(img).astype("uint8"), "RGB")
         pil_image = zoom_at(pil_image, img.shape[0] / 2, img.shape[1] / 2, 1 - zoom * cli.max_zoom)
@@ -341,14 +345,13 @@ with log("Setup latent, input and  optim"):
     n_frames = max(script.keys()) if cli.music is None else eq.shape[-1]
 
 console.rule("🕹 Settings 🕹")
-print(
-    f"""[yellow]
-    The plan is the following:\n
+print(f"""[yellow]
+    The plan is the following:
     Will generate {n_frames=} on {cli.device=} with {seed=}\n
-    using {script=}\n
-    the {cli.music=} has {sum(beats)=}
-[/yellow]"""
-)
+    using script:[/yellow]""")
+print(script)
+print(f"""[yellow]
+    With the {cli.music=} that has {sum(beats)=} zoomable.[/yellow]""")
 console.rule("🐢🦖 Will start now ☘️🍀")
 
 # %% One big trainings loop
@@ -371,4 +374,4 @@ for frame in trange(n_frames):
     imageio.imwrite(save_path / f"{frame:05d}.png", img)
 
     if cli.music is not None:
-        z = image_effects(model, img, beats[frame], eq[-4, frame])
+        z = image_effects(model, z, img, beats[frame], eq[-4, frame])
