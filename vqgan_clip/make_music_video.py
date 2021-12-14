@@ -22,17 +22,32 @@ def parse_cli():
     effects.add_argument("-max_zoom", type=float, default=0.01, help="Maximal zoom percentage in one step")
     effects.add_argument("-max_rotate", type=int, default=5, help="Maximal degrees rotation in one step")
     effects.add_argument("-beat_measure", type=int, default=4, help="Measure of the song, counted in beats")
+    effects.add_argument("-beat_phase", type=int, default=5, help="Start of the first measure, counted in beats")
 
     irrelevant = parser.add_argument_group("Probably uninteresting arguments")
     irrelevant.add_argument("-size", type=int, default=900, help="Output width/height of the video")
-    irrelevant.add_argument("-seed", type=int, default=9722186517928954566, help="torch seed to use")
+    irrelevant.add_argument("-seed", type=int, default=None, help="torch seed to use")
     irrelevant.add_argument("-optimizer", type=str, default="Adam", help="Optimizer to use from torch.optim")
-    irrelevant.add_argument("-save_path", type=str, default="./frames", help="Path to the folder where frames are saved")
-    irrelevant.add_argument("-keep_old_frames", action="store_true", help="Do not clear out the save frame folder in the beginning")
+    irrelevant.add_argument(
+        "-save_path", type=str, default="./frames", help="Path to the folder where frames are saved"
+    )
+    irrelevant.add_argument(
+        "-keep_old_frames", action="store_true", help="Do not clear out the save frame folder in the beginning"
+    )
     irrelevant.add_argument("-cutn", type=int, default=32, help="Number of augmented cutouts made for ascending")
     irrelevant.add_argument("-cut_pow", type=float, default=1.0, help="cutout power")
-    irrelevant.add_argument("-vqgan_config", type=str, default="weights/vqgan_imagenet_f16_16384.yaml", help="Path to the config of the VQ-GAN")
-    irrelevant.add_argument("-vqgan_checkpoint", type=str, default="weights/vqgan_imagenet_f16_16384.ckpt", help="Path to the weights of the VQ-GAN")
+    irrelevant.add_argument(
+        "-vqgan_config",
+        type=str,
+        default="weights/vqgan_imagenet_f16_16384.yaml",
+        help="Path to the config of the VQ-GAN",
+    )
+    irrelevant.add_argument(
+        "-vqgan_checkpoint",
+        type=str,
+        default="weights/vqgan_imagenet_f16_16384.ckpt",
+        help="Path to the weights of the VQ-GAN",
+    )
     irrelevant.add_argument("-clip_model", type=str, default="ViT-B/32", help="CliP model to use")
 
     return parser.parse_args()
@@ -51,11 +66,14 @@ import torchvision
 from omegaconf import OmegaConf
 from PIL import Image
 from rich import print
+from rich.console import Console
 from taming.models import cond_transformer, vqgan
 from torch import nn
 from torch.nn import functional as F
 from torchvision.transforms import functional as TF
 from tqdm import trange
+
+console = Console()
 
 
 @contextmanager
@@ -119,8 +137,8 @@ with log("Setup inputs"):
             _, beat_idx = librosa.beat.beat_track(y=wave, sr=sr)
             beat_idx = np.round(librosa.frames_to_time(beat_idx, sr=sr) * cli.fps).astype(int)
             beats = np.zeros(osize)
-            beats[beat_idx[:: cli.beat_measure]] = 1
-            beats = np.convolve(beats, [0, 0, 0, 0, 0, 0, 0, 1, 0.8, 0.5, 0.4, 0.3, 0.2, 0.1, 0.01], mode="same")
+            beats[beat_idx[cli.beat_phase :: cli.beat_measure]] = 1
+            # beats = np.convolve(beats, [0, 0, 0, 0, 0, 0, 0, 1, 0.8, 0.5, 0.4, 0.3, 0.2, 0.1, 0.01], mode="same")
             return beats
 
         eq = compute_eq(wave, sr, amax=35, eq_bins=16)
@@ -322,12 +340,16 @@ with log("Setup latent, input and  optim"):
     optimizer: torch.optim.Optimizer = getattr(torch.optim, cli.optimizer)([z], lr=cli.lr)
     n_frames = max(script.keys()) if cli.music is None else eq.shape[-1]
 
+console.rule("🕹 Settings 🕹")
 print(
     f"""[yellow]
     The plan is the following:\n
-    Will generate {n_frames=} on {cli.device=} with {seed=}
+    Will generate {n_frames=} on {cli.device=} with {seed=}\n
+    using {script=}\n
+    the {cli.music=} has {sum(beats)=}
 [/yellow]"""
 )
+console.rule("🐢🦖 Will start now ☘️🍀")
 
 # %% One big trainings loop
 for frame in trange(n_frames):
