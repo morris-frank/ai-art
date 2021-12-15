@@ -27,7 +27,7 @@ def parse_cli():
 
     irrelevant = parser.add_argument_group("Probably uninteresting arguments")
     irrelevant.add_argument("-size", type=int, nargs=2, default=[1280, 720], help="Output width/height of the video")
-    irrelevant.add_argument("-seed", type=int, default=9722186517928954566, help="torch seed to use")
+    irrelevant.add_argument("-seed", type=int, default=None, help="torch seed to use")
     irrelevant.add_argument("-optimizer", type=str, default="Adam", help="Optimizer to use from torch.optim")
     irrelevant.add_argument(
         "-save_path", type=str, default="./frames", help="Path to the folder where frames are saved"
@@ -107,7 +107,7 @@ with log("Setup inputs"):
 
     script = {}
     if cli.script is not None:
-        script = pd.read_csv(cli.script, header=None, index_col=0)
+        script = pd.read_csv(f"../inputs/{cli.script}", header=None, index_col=0)
         script.index = cli.fps * script.index.to_series().apply(
             lambda time: sum(x * int(t) for x, t in zip([60, 1], time.split(":")))
         )
@@ -116,7 +116,7 @@ with log("Setup inputs"):
     if cli.music is not None:
         import librosa
 
-        wave, sr = librosa.load(cli.music)
+        wave, sr = librosa.load(f"../inputs/{cli.music}")
 
         def compute_eq(wave, sr, amax, eq_bins):
             C = np.abs(librosa.cqt(wave, sr=sr, fmin=librosa.note_to_hz("A1")))
@@ -140,7 +140,7 @@ with log("Setup inputs"):
             beat_idx = np.round(librosa.frames_to_time(beat_idx, sr=sr) * cli.fps).astype(int)
             beats = np.zeros(osize)
             beats[beat_idx[cli.beat_phase :: cli.beat_measure]] = 1
-            # beats = np.convolve(beats, [0, 0, 0, 0, 0, 0, 0, 1, 0.8, 0.5, 0.4, 0.3, 0.2, 0.1, 0.01], mode="same")
+            beats = np.convolve(beats, [0, 0, 0, 0, 0, 0, 0, 1, 0.8, 0.5, 0.4, 0.3, 0.2, 0.1, 0.01], mode="same")
             return beats
 
         eq = compute_eq(wave, sr, amax=35, eq_bins=16)
@@ -353,11 +353,7 @@ print(f"""[yellow]
     With the {cli.music=} that has {sum(beats)} zoomable beats.[/yellow]""")
 console.rule("🐢🦖 Will start now ☘️🍀")
 
-# %% One big trainings loop
-for frame in trange(n_frames):
-    if frame in script:
-        prompt = make_prompt(script[frame])
-
+def train_step(save: bool = True, lr_step: bool = True) -> np.ndarray:
     optimizer.zero_grad(set_to_none=True)
     z_q = vector_quantize(model, z)
     y = clamp_with_grad(model.decode(z_q).add(1).div(2), 0, 1)
@@ -365,22 +361,30 @@ for frame in trange(n_frames):
     loss = prompt(y_aug)
     loss.backward()
     optimizer.step()
-    scheduler.step()
     with torch.inference_mode():
         z.copy_(z.maximum(z_min).minimum(z_max))
-
+    if lr_step:
+        scheduler.step()
     img: np.ndarray = y.cpu().detach().mul(255).clamp(0, 255)[0].numpy().astype(np.uint8)
     img = np.transpose(img, (1, 2, 0))
-    imageio.imwrite(save_path / f"{frame:05d}.png", img)
+    if save:
+        imageio.imwrite(save_path / f"{frame:05d}.png", img)
+    return img
+
+for frame in trange(n_frames):
+    if frame in script:
+        prompt = make_prompt(script[frame])
+
+    img = train_step()
 
     if cli.music is not None:
-        # if frame > 500:
-        #     with torch.inference_mode():
-        #         eq_bins: int = eq.shape[0]
-        #         for i in range(eq_bins):
-        #             z[:, i::z.shape[1]//eq_bins, :, :] *= 0.3 * eq[i, frame]
+        with torch.inference_mode():
+            eq_bins: int = eq.shape[0]
+            for i in range(eq_bins):
+                z[:, i::z.shape[1]//eq_bins, :, :] *= 1 + 0.3 * eq[i, frame] > 0.7
         
-        if beats[frame] > 0:
-            # with torch.inference_mode():
-            z = image_effects(model, z, img, eq[0, frame] * beats[frame], eq[-4, frame])
+        # if beats[frame] > 0:
+        #     z = image_effects(model, z, img, eq[0, frame] * beats[frame], eq[-4, frame])
+        #     for _ in range(3):
+        #         train_step()
 
