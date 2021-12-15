@@ -4,6 +4,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
+import os
 import requests
 from rich import get_console, pretty
 import collections.abc
@@ -17,19 +18,8 @@ pretty.install()
 traceback.install()
 
 CWD = Path(__file__).parent
-input_path = CWD.parent / "inputs"
-results_path = CWD / "results"
-
-def ArgumentParser() -> _ArgumentParser:
-    parser = _ArgumentParser()
-    parser.add_argument("-d", "-device",   dest="device", default="cuda:0")
-    parser.add_argument("-c", "-continue", dest="cont", action="store_true", help="Do not delete previous results.")
-    weight_dirs = list(filter(lambda d: (CWD/d).exists(), ["models", "weights", "checkpoints"]))
-    # if len(weight_dirs) > 0:
-    #     parser.add_argument("-chkpt", "-weights", "-checkpoint", dest="checkpoint")
-    if (CWD / "checkpoints").exists():
-        print("checkpoints exists")
-    return parser
+INPUTS = CWD.parent / "inputs"
+RESULTS = CWD / "results"
 
 def file_input(path: str):
     if path is None:
@@ -42,14 +32,14 @@ def file_input(path: str):
         fd.seek(0)
         return fd
     else:
-        if len(list(input_path.glob(f"{path}*"))) == 1:
-            path = next(input_path.glob(f"{path}*"))
+        if len(list(INPUTS.glob(f"{path}*"))) == 1:
+            path = next(INPUTS.glob(f"{path}*"))
         return open(path, "rb")
 
 def output_path(*names: str, ext="png") -> Path:
     def tostr(obj: Any) -> str:
         return ".".join(map(tostr, obj)) if isinstance(obj, collections.abc.Sequence) and not isinstance(obj, str) else re.sub('[^\w ]+','', str(obj)).lower().strip().replace(" ", ".")
-    folder = results_path / tostr(names)
+    folder = RESULTS / tostr(names)
     folder.mkdir(exist_ok=True, parents=True)
     i = 0
     while (folder / f"{i:05}.{ext}").exists():
@@ -58,11 +48,17 @@ def output_path(*names: str, ext="png") -> Path:
 
 
 @contextmanager
-def log(action: str):
-    start_time = time.perf_counter()
-    print(f"[yellow]{action}…[/yellow]")
-    try:
-        yield None
-    finally:
-        duration = time.perf_counter() - start_time
-        print(f"[green]{action} ✔[/green] ({int(duration)}s)")
+def log(action: str, suppress_output: bool = True):
+    with open(os.devnull, "w") as devnull:
+        start_time = time.perf_counter()
+        print(f"[yellow]{action}…[/yellow]")
+        if not suppress_output:
+            old_stdout, old_stderr = sys.stdout, sys.stderr
+            sys.stdout, sys.stderr = devnull, devnull
+        try:
+            yield None
+        finally:
+            if not suppress_output:
+                sys.stdout, sys.stderr = old_stdout, old_stderr
+            duration = time.perf_counter() - start_time
+            print(f"[green]{action} ✔[/green] ({int(duration)}s)")

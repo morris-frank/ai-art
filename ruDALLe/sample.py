@@ -7,9 +7,11 @@ from rudalle import get_realesrgan, get_ruclip, get_rudalle_model, get_tokenizer
 from rudalle.pipelines import cherry_pick_by_clip, generate_images, super_resolution
 from rudalle.utils import seed_everything
 
-from utils import log, ArgumentParser
+from utils import log
 
 parser = ArgumentParser()
+parser.add_argument("-d", "-device",   dest="device", default="cuda:0")
+parser.add_argument("-c", "-continue", dest="cont", action="store_true", help="Do not delete previous results.")
 parser.add_argument("-chkpt")
 parser.add_argument("-model", default="Malevich", choices={"Malevich", "Emojich"})
 parser.add_argument("-texts", nargs="+")
