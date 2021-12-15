@@ -20,14 +20,14 @@ def parse_cli():
         "-lr_warmup", type=float, default=0.1, help="Percentage of the video that is used for linear LR start up"
     )
     relevant.add_argument("-device", type=str, default="cuda:0", help="GPU to use")
-    relevant.add_argument("-fps", type=int, default=25, help="Sampling rate alas the FPS of the output video")
+    relevant.add_argument("-fps", type=int, default=50, help="Sampling rate alas the FPS of the output video")
 
     effects = parser.add_argument_group("Effect arguments")
     effects.add_argument("-max_zoom", type=float, default=0.1, help="Maximal zoom percentage in one step")
     effects.add_argument("-max_rotate", type=int, default=0, help="Maximal degrees rotation in one step")
-    effects.add_argument("-beat_measure", type=int, default=16, help="Measure of the song, counted in beats")
+    effects.add_argument("-beat_measure", type=int, default=8, help="Measure of the song, counted in beats")
     effects.add_argument("-beat_phase", type=int, default=32, help="Start of the first measure, counted in beats")
-    effects.add_argument("-pulse_delay", type=int, default=1, help="Delay of the memory pulse in seconds")
+    effects.add_argument("-pulse_delay", type=int, default=2, help="Delay of the memory pulse in beats")
 
     irrelevant = parser.add_argument_group("Probably uninteresting arguments")
     irrelevant.add_argument(
@@ -146,15 +146,15 @@ with log("Setup inputs"):
             return eq
 
         def compute_beat_markers(wave, sr, osize):
-            _, beat_idx = librosa.beat.beat_track(y=wave, sr=sr)
+            tempo, beat_idx = librosa.beat.beat_track(y=wave, sr=sr)
             beat_idx = np.round(librosa.frames_to_time(beat_idx, sr=sr) * cli.fps).astype(int)
             beats = np.zeros(osize)
             beats[beat_idx[cli.beat_phase :: cli.beat_measure]] = 1
             beats = np.convolve(beats, [0, 0, 0, 0, 0, 0, 0, 1, 0.8, 0.5, 0.4, 0.3, 0.2, 0.1, 0.01], mode="same")
-            return beats
+            return tempo, beats
 
         eq = compute_eq(wave, sr, amax=35, eq_bins=16)
-        beats = compute_beat_markers(wave, sr, eq.shape[1])
+        tempo, beats = compute_beat_markers(wave, sr, eq.shape[1])
         del wave, sr, compute_eq, compute_beat_markers
 
 with log("General library"):
@@ -357,7 +357,7 @@ with log("Setup latent, input and  optim"):
     scheduler = torch.optim.lr_scheduler.LambdaLR(
         optimizer, lr_lambda=lambda x: np.minimum(1, x / (n_frames * cli.lr_warmup))
     )
-    delay_queue = queue.Queue(cli.fps * cli.pulse_delay)
+    delay_queue = queue.Queue(round(cli.pulse_delay * cli.fps * 60 / tempo))
     z_anchor = None
 
 console.rule("🕹 Settings 🕹")
@@ -371,7 +371,7 @@ print(
 print(script)
 print(
     f"""[yellow]
-    With the {cli.music=} that has {sum(beats)} zoomable beats.[/yellow]"""
+    With the {cli.music=} that has {sum(beats==1)} zoomable beats at {tempo=}.[/yellow]"""
 )
 console.rule("🐢🦖 Will start now ☘️🍀")
 
@@ -411,8 +411,8 @@ for frame in trange(n_frames):
                 z_translation = z_anchor - z
                 eq_bins: int = eq.shape[0]
                 N_z = z.shape[1]
-                for i in range(eq_bins):
-                    z[:, i :: N_z // eq_bins, :, :] += eq[i, frame] * z_translation[:, i :: N_z // eq_bins, :, :]
+                for i in range(eq_bins//2, eq_bins):
+                    z[:, i :: N_z // (eq_bins//2), :, :] += eq[i, frame] * z_translation[:, i :: N_z // (eq_bins//2), :, :]
 
         if beats[frame] > 0 and (cli.max_zoom > 0 or cli.max_rotate > 0):
             z = image_effects(model, z, img, eq[0, frame] * beats[frame], eq[-4, frame] * beats[frame])
