@@ -20,10 +20,10 @@ def parse_cli():
     relevant.add_argument("-fps", type=int, default=25, help="Sampling rate alas the FPS of the output video")
 
     effects = parser.add_argument_group("Effect arguments")
-    effects.add_argument("-max_zoom", type=float, default=0.01, help="Maximal zoom percentage in one step")
+    effects.add_argument("-max_zoom", type=float, default=0.1, help="Maximal zoom percentage in one step")
     effects.add_argument("-max_rotate", type=int, default=5, help="Maximal degrees rotation in one step")
     effects.add_argument("-beat_measure", type=int, default=16, help="Measure of the song, counted in beats")
-    effects.add_argument("-beat_phase", type=int, default=14, help="Start of the first measure, counted in beats")
+    effects.add_argument("-beat_phase", type=int, default=32, help="Start of the first measure, counted in beats")
 
     irrelevant = parser.add_argument_group("Probably uninteresting arguments")
     irrelevant.add_argument("-size", type=int, nargs=2, default=[1280, 720], help="Output width/height of the video")
@@ -75,7 +75,7 @@ from torchvision.transforms import functional as TF
 from tqdm import trange
 
 console = Console()
-
+print(vars(cli))
 
 @contextmanager
 def log(action: str):
@@ -133,7 +133,6 @@ with log("Setup inputs"):
                 if eq is None:
                     eq = np.zeros((eq_bins, l.shape[-1]))
                 eq[i, :] = l / l.max()
-            eq -= np.median(eq, 1, keepdims=True)
             return eq
 
         def compute_beat_markers(wave, sr, osize):
@@ -322,11 +321,8 @@ with log("Effect library"):
             img = img.crop((x - w / zoom2, y - h / zoom2, x + w / zoom2, y + h / zoom2))
             return img.resize((w, h), Image.LANCZOS)
 
-        if zoom == 0:
-            return z
-
         pil_image = Image.fromarray(np.array(img).astype("uint8"), "RGB")
-        pil_image = zoom_at(pil_image, img.shape[1] / 2, img.shape[0] / 2, 1 - zoom * cli.max_zoom)
+        pil_image = zoom_at(pil_image, img.shape[1] / 2, img.shape[0] / 2, 1 + zoom * cli.max_zoom)
         # pil_image = pil_image.rotate(round(rotate * cli.max_rotate))
 
         _z, *_ = model.encode(TF.to_tensor(pil_image).to(cli.device).unsqueeze(0) * 2 - 1)
@@ -354,7 +350,7 @@ print(f"""[yellow]
     Prompt script is[/yellow]""")
 print(script)
 print(f"""[yellow]
-    With the {cli.music=} that has {sum(beats)=} zoomable.[/yellow]""")
+    With the {cli.music=} that has {sum(beats)} zoomable beats.[/yellow]""")
 console.rule("🐢🦖 Will start now ☘️🍀")
 
 # %% One big trainings loop
@@ -378,4 +374,13 @@ for frame in trange(n_frames):
     imageio.imwrite(save_path / f"{frame:05d}.png", img)
 
     if cli.music is not None:
-        z = image_effects(model, z, img, eq[0, frame] * beats[frame], eq[-4, frame])
+        # if frame > 500:
+        #     with torch.inference_mode():
+        #         eq_bins: int = eq.shape[0]
+        #         for i in range(eq_bins):
+        #             z[:, i::z.shape[1]//eq_bins, :, :] *= 0.3 * eq[i, frame]
+        
+        if beats[frame] > 0:
+            # with torch.inference_mode():
+            z = image_effects(model, z, img, eq[0, frame] * beats[frame], eq[-4, frame])
+
