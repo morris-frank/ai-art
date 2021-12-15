@@ -1,6 +1,7 @@
 import argparse
 import math
 import os
+import queue
 import sys
 import time
 from contextlib import contextmanager
@@ -15,18 +16,23 @@ def parse_cli():
     relevant.add_argument("-script", type=str, default=None, help="Path to the CSV prompt script")
     relevant.add_argument("-music", type=str, default=None, help="Path to the music file")
     relevant.add_argument("-lr", type=float, default=0.1, help="Learning rate")
-    relevant.add_argument("-lr_warmup", type=float, default=0.1, help="Percentage of the video that is used for linear LR start up")
+    relevant.add_argument(
+        "-lr_warmup", type=float, default=0.1, help="Percentage of the video that is used for linear LR start up"
+    )
     relevant.add_argument("-device", type=str, default="cuda:0", help="GPU to use")
     relevant.add_argument("-fps", type=int, default=25, help="Sampling rate alas the FPS of the output video")
 
     effects = parser.add_argument_group("Effect arguments")
     effects.add_argument("-max_zoom", type=float, default=0.1, help="Maximal zoom percentage in one step")
-    effects.add_argument("-max_rotate", type=int, default=5, help="Maximal degrees rotation in one step")
+    effects.add_argument("-max_rotate", type=int, default=0, help="Maximal degrees rotation in one step")
     effects.add_argument("-beat_measure", type=int, default=16, help="Measure of the song, counted in beats")
     effects.add_argument("-beat_phase", type=int, default=32, help="Start of the first measure, counted in beats")
+    effects.add_argument("-pulse_delay", type=int, default=1, help="Delay of the memory pulse in seconds")
 
     irrelevant = parser.add_argument_group("Probably uninteresting arguments")
-    irrelevant.add_argument("-size", type=int, nargs=2, default=[1280, 720], help="Output width/height of the video")
+    irrelevant.add_argument(
+        "-size", type=int, nargs=2, default=None, help="Output width/height of the video, otherwise base on init frame"
+    )
     irrelevant.add_argument("-seed", type=int, default=None, help="torch seed to use")
     irrelevant.add_argument("-optimizer", type=str, default="Adam", help="Optimizer to use from torch.optim")
     irrelevant.add_argument(
@@ -34,6 +40,9 @@ def parse_cli():
     )
     irrelevant.add_argument(
         "-keep_old_frames", action="store_true", help="Do not clear out the save frame folder in the beginning"
+    )
+    irrelevant.add_argument(
+        "-extra_steps_after_image_effect", type=int, default=3, help="extra steps after image effect"
     )
     irrelevant.add_argument("-cutn", type=int, default=32, help="Number of augmented cutouts made for ascending")
     irrelevant.add_argument("-cut_pow", type=float, default=1.0, help="cutout power")
@@ -50,6 +59,7 @@ def parse_cli():
         help="Path to the weights of the VQ-GAN",
     )
     irrelevant.add_argument("-clip_model", type=str, default="ViT-B/32", help="CliP model to use")
+    irrelevant.add_argument("-v", action="store_true", help="More verbosity", dest="verbose")
 
     return parser.parse_args()
 
@@ -77,20 +87,20 @@ from tqdm import trange
 console = Console()
 print(vars(cli))
 
+
 @contextmanager
-def log(action: str):
+def log(action: str, suppress_output: bool = not cli.verbose):
     with open(os.devnull, "w") as devnull:
         start_time = time.perf_counter()
         print(f"[yellow]{action}…[/yellow]")
-        old_stdout = sys.stdout
-        old_stderr = sys.stderr
-        sys.stdout = devnull
-        sys.stderr = devnull
+        if suppress_output:
+            old_stdout, old_stderr = sys.stdout, sys.stderr
+            sys.stdout, sys.stderr = devnull, devnull
         try:
             yield None
         finally:
-            sys.stdout = old_stdout
-            sys.stderr = old_stderr
+            if suppress_output:
+                sys.stdout, sys.stderr = old_stdout, old_stderr
             duration = time.perf_counter() - start_time
             print(f"[green]{action} ✔[/green] ({int(duration)}s)")
 
@@ -308,7 +318,9 @@ with log("Special library"):
 
     def load_init_image(model, path):
         f = 2 ** (model.decoder.num_resolutions - 1)
-        img = Image.open(path).convert("RGB").resize(((cli.size[0] // f) * f, (cli.size[1] // f) * f), Image.LANCZOS)
+        img = Image.open(path).convert("RGB")
+        size = img.size if cli.size is None else cli.size
+        img = img.resize(((size[0] // f) * f, (size[1] // f) * f), Image.LANCZOS)
         return TF.to_tensor(img)
 
 
@@ -322,8 +334,10 @@ with log("Effect library"):
             return img.resize((w, h), Image.LANCZOS)
 
         pil_image = Image.fromarray(np.array(img).astype("uint8"), "RGB")
-        pil_image = zoom_at(pil_image, img.shape[1] / 2, img.shape[0] / 2, 1 + zoom * cli.max_zoom)
-        # pil_image = pil_image.rotate(round(rotate * cli.max_rotate))
+        if cli.max_zoom > 0:
+            pil_image = zoom_at(pil_image, img.shape[1] / 2, img.shape[0] / 2, 1 + zoom * cli.max_zoom)
+        if cli.max_rotate > 0:
+            pil_image = pil_image.rotate(round(rotate * cli.max_rotate))
 
         _z, *_ = model.encode(TF.to_tensor(pil_image).to(cli.device).unsqueeze(0) * 2 - 1)
         z.data = _z.data
@@ -337,21 +351,30 @@ with log("Load clip"):
 with log("Setup latent, input and  optim"):
     n_frames = max(script.keys()) if cli.music is None else eq.shape[-1]
     make_cutouts = MakeCutouts(perceptor.visual.input_resolution, cli.cutn, cut_pow=cli.cut_pow)
-    z, *_ = model.encode(load_init_image(model, cli.init_image).to(cli.device).unsqueeze(0) * 2 - 1)
+    z, *_ = model.encode(load_init_image(model, f"../inputs/{cli.init_image}").to(cli.device).unsqueeze(0) * 2 - 1)
     z.requires_grad_(True)
     optimizer: torch.optim.Optimizer = getattr(torch.optim, cli.optimizer)([z], lr=cli.lr)
-    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda x: np.minimum(1, x/(n_frames * cli.lr_warmup)))
+    scheduler = torch.optim.lr_scheduler.LambdaLR(
+        optimizer, lr_lambda=lambda x: np.minimum(1, x / (n_frames * cli.lr_warmup))
+    )
+    delay_queue = queue.Queue(cli.fps * cli.pulse_delay)
+    z_anchor = None
 
 console.rule("🕹 Settings 🕹")
-print(f"""[yellow]
+print(
+    f"""[yellow]
     The plan is the following:
     Will generate {n_frames=} on {cli.device=} with {seed=}.
     Learning rate with reach {cli.lr=} after linearly going there for {n_frames*cli.lr_warmup} steps.
-    Prompt script is[/yellow]""")
+    Prompt script is[/yellow]"""
+)
 print(script)
-print(f"""[yellow]
-    With the {cli.music=} that has {sum(beats)} zoomable beats.[/yellow]""")
+print(
+    f"""[yellow]
+    With the {cli.music=} that has {sum(beats)} zoomable beats.[/yellow]"""
+)
 console.rule("🐢🦖 Will start now ☘️🍀")
+
 
 def train_step(save: bool = True, lr_step: bool = True) -> np.ndarray:
     optimizer.zero_grad(set_to_none=True)
@@ -371,20 +394,27 @@ def train_step(save: bool = True, lr_step: bool = True) -> np.ndarray:
         imageio.imwrite(save_path / f"{frame:05d}.png", img)
     return img
 
+
 for frame in trange(n_frames):
     if frame in script:
         prompt = make_prompt(script[frame])
 
     img = train_step()
 
-    if cli.music is not None:
-        with torch.inference_mode():
-            eq_bins: int = eq.shape[0]
-            for i in range(eq_bins):
-                z[:, i::z.shape[1]//eq_bins, :, :] *= 1 + 0.3 * eq[i, frame] > 0.7
-        
-        # if beats[frame] > 0:
-        #     z = image_effects(model, z, img, eq[0, frame] * beats[frame], eq[-4, frame])
-        #     for _ in range(3):
-        #         train_step()
+    if delay_queue.full():
+        z_anchor = delay_queue.get()
+    delay_queue.put(z.detach().clone())
 
+    if cli.music is not None:
+        if z_anchor is not None:
+            with torch.inference_mode():
+                z_translation = z_anchor - z
+                eq_bins: int = eq.shape[0]
+                N_z = z.shape[1]
+                for i in range(eq_bins):
+                    z[:, i :: N_z // eq_bins, :, :] += eq[i, frame] * z_translation[:, i :: N_z // eq_bins, :, :]
+
+        if beats[frame] > 0 and (cli.max_zoom > 0 or cli.max_rotate > 0):
+            z = image_effects(model, z, img, eq[0, frame] * beats[frame], eq[-4, frame] * beats[frame])
+            for _ in range(cli.extra_steps_after_image_effect):
+                train_step()

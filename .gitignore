@@ -2,3 +2,6 @@ lib
 .vscode
 */results
 */weights
+*/steps
+*/frames*
+frames
