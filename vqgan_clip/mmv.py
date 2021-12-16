@@ -1,3 +1,8 @@
+# TODO
+# - match times to beats
+# - accept beat counts instead of times
+# - make audio feature outputter
+
 import argparse
 import math
 import os
@@ -17,15 +22,15 @@ def parse_cli():
     relevant.add_argument("-music", type=str, default=None, help="Path to the music file")
     relevant.add_argument("-lr", type=float, default=0.1, help="Learning rate")
     relevant.add_argument(
-        "-lr_warmup", type=float, default=0.1, help="Percentage of the video that is used for linear LR start up"
+        "-lr_warmup", type=float, default=0.05, help="Percentage of the video that is used for linear LR start up"
     )
     relevant.add_argument("-device", type=str, default="cuda:0", help="GPU to use")
-    relevant.add_argument("-fps", type=int, default=50, help="Sampling rate alas the FPS of the output video")
+    relevant.add_argument("-fps", type=int, default=30, help="Sampling rate alas the FPS of the output video")
 
     effects = parser.add_argument_group("Effect arguments")
     effects.add_argument("-max_zoom", type=float, default=0.1, help="Maximal zoom percentage in one step")
     effects.add_argument("-max_rotate", type=int, default=0, help="Maximal degrees rotation in one step")
-    effects.add_argument("-beat_measure", type=int, default=8, help="Measure of the song, counted in beats")
+    effects.add_argument("-beat_measure", type=int, default=4, help="Measure of the song, counted in beats")
     effects.add_argument("-beat_phase", type=int, default=32, help="Start of the first measure, counted in beats")
     effects.add_argument("-pulse_delay", type=int, default=2, help="Delay of the memory pulse in beats")
 
@@ -42,7 +47,7 @@ def parse_cli():
         "-keep_old_frames", action="store_true", help="Do not clear out the save frame folder in the beginning"
     )
     irrelevant.add_argument(
-        "-extra_steps_after_image_effect", type=int, default=3, help="extra steps after image effect"
+        "-extra_steps_after_image_effect", type=int, default=4, help="extra steps after image effect"
     )
     irrelevant.add_argument("-cutn", type=int, default=32, help="Number of augmented cutouts made for ascending")
     irrelevant.add_argument("-cut_pow", type=float, default=1.0, help="cutout power")
@@ -59,6 +64,7 @@ def parse_cli():
         help="Path to the weights of the VQ-GAN",
     )
     irrelevant.add_argument("-clip_model", type=str, default="ViT-B/32", help="CliP model to use")
+    irrelevant.add_argument("-eq_bins", type=int, default=16, help="Number of bins for the spectrogram")
     irrelevant.add_argument("-v", action="store_true", help="More verbosity", dest="verbose")
 
     return parser.parse_args()
@@ -149,11 +155,11 @@ with log("Setup inputs"):
             tempo, beat_idx = librosa.beat.beat_track(y=wave, sr=sr)
             beat_idx = np.round(librosa.frames_to_time(beat_idx, sr=sr) * cli.fps).astype(int)
             beats = np.zeros(osize)
-            beats[beat_idx[cli.beat_phase :: cli.beat_measure]] = 1
+            beats[beat_idx[cli.beat_phase :: cli.beat_measure] - 5] = 1
             beats = np.convolve(beats, [0, 0, 0, 0, 0, 0, 0, 1, 0.8, 0.5, 0.4, 0.3, 0.2, 0.1, 0.01], mode="same")
             return tempo, beats
 
-        eq = compute_eq(wave, sr, amax=35, eq_bins=16)
+        eq = compute_eq(wave, sr, amax=35, eq_bins=cli.eq_bins)
         tempo, beats = compute_beat_markers(wave, sr, eq.shape[1])
         del wave, sr, compute_eq, compute_beat_markers
 
@@ -359,6 +365,7 @@ with log("Setup latent, input and  optim"):
     )
     delay_queue = queue.Queue(round(cli.pulse_delay * cli.fps * 60 / tempo))
     z_anchor = None
+    c_z = z.shape[1] # number of latent dimensions!
 
 console.rule("🕹 Settings 🕹")
 print(
@@ -394,7 +401,6 @@ def train_step(save: bool = True, lr_step: bool = True) -> np.ndarray:
         imageio.imwrite(save_path / f"{frame:05d}.png", img)
     return img
 
-
 for frame in trange(n_frames):
     if frame in script:
         prompt = make_prompt(script[frame])
@@ -409,12 +415,9 @@ for frame in trange(n_frames):
         if z_anchor is not None:
             with torch.inference_mode():
                 z_translation = z_anchor - z
-                eq_bins: int = eq.shape[0]
-                N_z = z.shape[1]
-                for i in range(eq_bins//2, eq_bins):
-                    z[:, i :: N_z // (eq_bins//2), :, :] += eq[i, frame] * z_translation[:, i :: N_z // (eq_bins//2), :, :]
+                z[:, :, :, :] += 0.1 * z_translation[:, :, :, :]
 
         if beats[frame] > 0 and (cli.max_zoom > 0 or cli.max_rotate > 0):
             z = image_effects(model, z, img, eq[0, frame] * beats[frame], eq[-4, frame] * beats[frame])
             for _ in range(cli.extra_steps_after_image_effect):
-                train_step()
+                train_step(save=False, lr_step=False)
