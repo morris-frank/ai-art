@@ -1,17 +1,18 @@
-from pathlib import Path
-import librosa
 import argparse
+import shutil
+import subprocess
+from pathlib import Path
+
+import librosa
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
-import subprocess
 from tqdm import tqdm
-import os
 
 parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 parser.add_argument("file", type=str, help="music file")
 parser.add_argument("-fps", type=int, default=25)
-parser.add_argument("-beat_measure", type=int, default=16, help="Measure of the song, counted in beats")
-parser.add_argument("-beat_phase", type=int, default=32, help="Start of the first measure, counted in beats")
+parser.add_argument("-beat_measure", type=int, default=1, help="Measure of the song, counted in beats")
+parser.add_argument("-beat_phase", type=int, default=0, help="Start of the first measure, counted in beats")
 
 
 cli = parser.parse_args()
@@ -61,8 +62,4 @@ for i, (b, eq) in enumerate(tqdm(zip(beats, eq.T), total=beats.size)):
     ImageDraw.Draw(im).text((0, 0), f":{bcnt}", font=fnt, fill=(0, 0, 0))
     if b == 1:
         bcnt += 1
-    im.save(f"./frames/{i:05d}.png")
-print("[red]Start ffmpeg[/red]")
-outpath = Path(cli.file).with_suffix(".mp4")
-subprocess.call(["ffmpeg", "-i", "frames/%05d.png", "-i", f"inputs/{cli.file}", "-c:v", "libx264", outpath])
-print("[red]Finished ffmpeg[/red]")
+    im.save(f"./frames/{i:05d}.jpg")
