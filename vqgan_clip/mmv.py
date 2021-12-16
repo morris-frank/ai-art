@@ -415,7 +415,7 @@ for frame in trange(n_frames):
         if z_anchor is not None:
             with torch.inference_mode():
                 z_translation = z_anchor - z
-                z[:, :, :, :] += 0.1 * z_translation[:, :, :, :]
+                z[:, :, :, :] += 0.5 * z_translation[:, :, :, :]
 
         if beats[frame] > 0 and (cli.max_zoom > 0 or cli.max_rotate > 0):
             z = image_effects(model, z, img, eq[0, frame] * beats[frame], eq[-4, frame] * beats[frame])
