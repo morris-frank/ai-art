@@ -12,8 +12,11 @@ batch_size=4
 
 Path("./upsampled_frames").mkdir(exist_ok=True)
 with torch.inference_mode():
-    for fp in tqdm(list(Path("./frames").glob("*png"))):
+    for fp in tqdm(sorted(list(Path("./frames").glob("*jpg")))):
+        op = f"./upsampled_frames/{fp.with_suffix('.jpg').name}"
+        if Path(op).exists():
+            continue
         pil_image = Image.open(fp).convert("RGB")
         sr_image = realesrgan.predict(np.array(pil_image), batch_size=batch_size)
-        Image.fromarray(sr_image).save(f"./upsampled_frames/{fp.name}")
+        sr_image.save(op)
 

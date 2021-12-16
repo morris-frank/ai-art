@@ -31,6 +31,7 @@ from torchvision.transforms import functional as TF
 from tqdm import trange
 
 console = Console()
+VERBOSE = False
 
 
 def parse_cli():
@@ -49,8 +50,8 @@ def parse_cli():
     effects = parser.add_argument_group("Effect arguments")
     effects.add_argument("-max_zoom", type=float, default=0.1, help="Maximal zoom percentage in one step")
     effects.add_argument("-max_rotate", type=int, default=0, help="Maximal degrees rotation in one step")
-    effects.add_argument("-beat_measure", type=int, default=4, help="Measure of the song, counted in beats")
-    effects.add_argument("-beat_phase", type=int, default=32, help="Start of the first measure, counted in beats")
+    # effects.add_argument("-beat_measure", type=int, default=4, help="Measure of the song, counted in beats")
+    # effects.add_argument("-beat_phase", type=int, default=32, help="Start of the first measure, counted in beats")
     effects.add_argument("-pulse_delay", type=float, default=0.5, help="Delay of the memory pulse in beats")
 
     irrelevant = parser.add_argument_group("Probably uninteresting arguments")
@@ -60,7 +61,7 @@ def parse_cli():
     irrelevant.add_argument("-seed", type=int, default=None, help="torch seed to use")
     irrelevant.add_argument("-optimizer", type=str, default="Adam", help="Optimizer to use from torch.optim")
     irrelevant.add_argument(
-        "-save_path", type=str, default="./frames", help="Path to the folder where frames are saved"
+        "-save_path", type=str, default="./steps", help="Path to the folder where frames are saved"
     )
     irrelevant.add_argument(
         "-keep_old_frames", action="store_true", help="Do not clear out the save frame folder in the beginning"
@@ -90,7 +91,7 @@ def parse_cli():
 
 
 @contextmanager
-def log(action: str, suppress_output: bool = not cli.verbose):
+def log(action: str, suppress_output: bool = not VERBOSE):
     with open(os.devnull, "w") as devnull:
         start_time = time.perf_counter()
         print(f"[yellow]{action}…[/yellow]")
@@ -302,11 +303,14 @@ def load_script(input_name):
     script = {}
     if input_name is not None:
         script = pd.read_csv(f"../inputs/{input_name}", header=None, index_col=0)
-        script.index = cli.fps * script.index.to_series().apply(
-            lambda time: sum(x * int(t) for x, t in zip([60, 1], time.split(":")))
-        )
+        beat_indexed = True
+        if script.index.dtype != int:
+            beat_indexed = False
+            script.index = cli.fps * script.index.to_series().apply(
+                lambda time: sum(x * int(t) for x, t in zip([60, 1], time.split(":")))
+            )
         script: Dict[int, str] = script.to_dict()[1]
-    return script
+    return script, beat_indexed
 
 
 def compute_eq(wave, sr, amax, eq_bins):
@@ -327,20 +331,26 @@ def compute_eq(wave, sr, amax, eq_bins):
     return eq
 
 
-def compute_beat_markers(wave, sr, osize):
-    tempo, beat_idx = librosa.beat.beat_track(y=wave, sr=sr)
-    beat_idx = np.round(librosa.frames_to_time(beat_idx, sr=sr) * cli.fps).astype(int)
-    beats = np.zeros(osize)
-    beats[beat_idx[cli.beat_phase :: cli.beat_measure] - 5] = 1
-    beats = np.convolve(beats, [0, 0, 0, 0, 0, 0, 0, 1, 0.8, 0.5, 0.4, 0.3, 0.2, 0.1, 0.01], mode="same")
-    return tempo, beats
+def compute_beat_markers(y, sr, hop_length=512):
+    onset_env = librosa.onset.onset_strength(y=y, sr=sr, hop_length=hop_length)
+    # chroma_cq = librosa.feature.chroma_cqt(y=y, sr=sr, hop_length=hop_length).T
+
+    tempo, btrack = librosa.beat.beat_track(onset_envelope=onset_env)
+    times = librosa.times_like(onset_env, sr=sr)
+
+    beats = np.zeros(round(y.size / sr * cli.fps) + 1)
+    beats[np.round(times[btrack] * cli.fps).astype(int)] = 1
+    beats_mag = beats.copy()
+    beats_mag[np.round(times[btrack] * cli.fps).astype(int)] = onset_env[btrack]
+    beats_mag = np.convolve(beats_mag, [0, 0, 0, 0, 0, 0, 0, 1, 0.8, 0.5, 0.4, 0.3, 0.2, 0.1, 0.01], mode="same")
+    return tempo, beats, beats_mag
 
 
 def load_music_features(input_name: str, eq_bins):
     wave, sr = librosa.load(f"../inputs/{input_name}")
     eq = compute_eq(wave, sr, amax=35, eq_bins=eq_bins)
-    tempo, beats = compute_beat_markers(wave, sr, eq.shape[1])
-    return tempo, beats, eq
+    tempo, beats, beats_mag = compute_beat_markers(wave, sr)
+    return tempo, beats, beats_mag, eq
 
 
 def train_step(save: bool = True, lr_step: bool = True) -> np.ndarray:
@@ -358,7 +368,7 @@ def train_step(save: bool = True, lr_step: bool = True) -> np.ndarray:
     img: np.ndarray = y.cpu().detach().mul(255).clamp(0, 255)[0].numpy().astype(np.uint8)
     img = np.transpose(img, (1, 2, 0))
     if save:
-        imageio.imwrite(save_path / f"{frame:05d}.png", img)
+        imageio.imwrite(save_path / f"{frame:05d}.jpg", img)
     return img
 
 
@@ -375,9 +385,9 @@ if __name__ == "__main__":
         for p in filter(Path.is_file, save_path.iterdir()):
             p.unlink()
 
-    script = load_script(cli.script)
+    script, beat_indexed = load_script(cli.script)
     if cli.music is not None:
-        tempo, beats, eq = load_music_features(cli.music, cli.eq_bins)
+        tempo, beats, beats_mag, eq = load_music_features(cli.music, cli.eq_bins)
 
     with log("Load image model"):
         model, z_min, z_max = load_vqgan_model(cli.vqgan_config, cli.vqgan_checkpoint)
@@ -411,8 +421,9 @@ if __name__ == "__main__":
     )
     console.rule("🐢🦖 Will start now ☘️🍀")
 
+    beat_idx = 0
     for frame in trange(n_frames):
-        if frame in script:
+        if not beat_indexed and frame in script:
             prompt = make_prompt(script[frame])
 
         img = train_step()
@@ -427,7 +438,12 @@ if __name__ == "__main__":
                     z_translation = z_anchor - z
                     z[:, :, :, :] += 0.1 * eq[0, frame] * z_translation[:, :, :, :]
 
-            if beats[frame] > 0 and (cli.max_zoom > 0 or cli.max_rotate > 0):
-                z = image_effects(model, z, img, eq[0, frame] * beats[frame], eq[-4, frame] * beats[frame])
+            if beats[frame] == 1 and (cli.max_zoom > 0 or cli.max_rotate > 0):
+                beat_idx += 1
+                if beat_indexed and beat_idx in script:
+                    print(f"Change to {script[frame]}")
+                    prompt = make_prompt(script[frame])
+                z = image_effects(model, z, img, eq[0, frame] * beats_mag[frame], eq[-4, frame] * beats_mag[frame])
                 for _ in range(cli.extra_steps_after_image_effect):
                     train_step(save=False, lr_step=False)
+                
